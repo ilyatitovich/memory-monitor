@@ -240,7 +240,7 @@ describe("MemoryMonitor", { concurrency: false }, () => {
     Reflect.deleteProperty(globalThis, "window");
   });
 
-  it("does not start when performance.memory is not an object", () => {
+  it("does not start when performance.memory is missing", () => {
     Object.defineProperty(globalThis, "performance", {
       value: { now: () => 0 },
       configurable: true,
@@ -253,6 +253,42 @@ describe("MemoryMonitor", { concurrency: false }, () => {
     const monitor = new MemoryMonitor({ log });
     monitor.start();
     assert.equal(monitor.isMonitoring, false);
+    Reflect.deleteProperty(globalThis, "window");
+  });
+
+  it("does not start when performance.memory is null", () => {
+    const performanceLike = { now: () => 0, memory: null };
+    Object.defineProperty(globalThis, "performance", {
+      value: performanceLike,
+      configurable: true,
+    });
+    Object.defineProperty(globalThis, "window", {
+      value: { performance: performanceLike },
+      configurable: true,
+    });
+    const { log } = createLogMock();
+    const monitor = new MemoryMonitor({ log });
+    monitor.start();
+    assert.equal(monitor.isMonitoring, false);
+    Reflect.deleteProperty(globalThis, "window");
+  });
+
+  it("does not start when usedJSHeapSize is missing or non-numeric", () => {
+    for (const memory of [{}, { usedJSHeapSize: "big" }]) {
+      const performanceLike = { now: () => 0, memory };
+      Object.defineProperty(globalThis, "performance", {
+        value: performanceLike,
+        configurable: true,
+      });
+      Object.defineProperty(globalThis, "window", {
+        value: { performance: performanceLike },
+        configurable: true,
+      });
+      const { log } = createLogMock();
+      const monitor = new MemoryMonitor({ log });
+      monitor.start();
+      assert.equal(monitor.isMonitoring, false);
+    }
     Reflect.deleteProperty(globalThis, "window");
   });
 

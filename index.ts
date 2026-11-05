@@ -164,9 +164,7 @@ export function detectMemoryLeak(
 }
 
 function isSupported(): boolean {
-  if (typeof window === "undefined" || !("performance" in window)) return false;
-  const memory: unknown = Reflect.get(performance, "memory");
-  return typeof memory == "object";
+  return usedJsHeapSizeMb() !== undefined;
 }
 
 /** Samples the JS heap and reports one leak or high-usage event per session. */
