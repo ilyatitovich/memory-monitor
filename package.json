@@ -1,0 +1,57 @@
+{
+  "name": "memory-monitor",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "A library for monitoring memory usage and detecting memory leaks.",
+  "keywords": [
+    "memory",
+    "monitor",
+    "leak",
+    "detection",
+    "memory-monitor"
+  ],
+  "author": "Ilya Titov",
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "c8 --100 bnt"
+  },
+  "c8": {
+    "extension": [
+      ".ts"
+    ],
+    "include": [
+      "index.ts"
+    ],
+    "exclude": [
+      "tests/**",
+      "dist/**"
+    ],
+    "reporter": [
+      "text",
+      "html"
+    ],
+    "check-coverage": true,
+    "lines": 100,
+    "functions": 100,
+    "branches": 100,
+    "statements": 100
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "better-node-test": "^0.8.4",
+    "c8": "^10.1.3",
+    "typescript": "^7.0.2"
+  }
+}
