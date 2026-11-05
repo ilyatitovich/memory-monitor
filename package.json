@@ -28,6 +28,7 @@
   ],
   "scripts": {
     "build": "tsc",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tests/tsconfig.json",
     "test": "c8 --100 bnt",
     "prepack": "npm run build && npm test"
   },

@@ -1,9 +1,10 @@
 name: Lint CI workflows
 on:
   push:
-    branches: ["main"]
+    branches:
+      - master
+      - main
   pull_request:
-    branches: ["**"]
 jobs:
   zizmor:
     runs-on: ubuntu-latest

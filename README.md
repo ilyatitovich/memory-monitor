@@ -142,9 +142,13 @@ A leak is reported when the sliding window has enough samples and coverage, tota
 ## Development
 
 ```bash
-npm test    # c8 with 100% coverage gate
-npm run build
+pnpm install
+pnpm run typecheck
+pnpm run build
+pnpm test    # c8 with 100% coverage gate
 ```
+
+CI runs typecheck, build, and test on Node 24 for pushes and pull requests.
 
 ## License
 
