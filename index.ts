@@ -1,6 +1,15 @@
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
 
+/** Log message strings emitted by {@link MemoryMonitor}. */
+export const MEMORY_EVENT = {
+  LEAK: "Detected potential memory leak",
+  HIGH_USAGE: "High memory usage",
+} as const;
+
+export type MemoryEventMessage =
+  (typeof MEMORY_EVENT)[keyof typeof MEMORY_EVENT];
+
 export interface HeapSnapshot {
   timestamp: number;
   usedJSHeapSizeMb: number;
@@ -40,7 +49,8 @@ export interface MemoryMonitorOptions extends Partial<Settings> {
   getTabCount?: () => number;
 }
 
-interface ReportMetadata {
+/** Shared fields attached to every monitor log event. */
+export interface ReportMetadata {
   usedJSHeapSizeMb: number;
   sessionDurationMinutes: number;
   tabVisible: boolean;
@@ -48,19 +58,21 @@ interface ReportMetadata {
   tabCount?: number;
 }
 
-interface MeasureBaseline {
-  timestamp: number;
-  counts: Record<string, number>;
-}
-
-interface MeasureGrowth {
+/** Largest measure deltas since the oldest retained baseline. */
+export interface MeasureGrowth {
   sinceMinutesAgo: number;
   counts: Record<string, number>;
 }
 
-interface MemoryInfo {
+/** Latest heap reading and leak detected for the current window, if any. */
+export interface MemoryInfo {
   memoryUsage: number | undefined;
   leak: MemoryLeak | undefined;
+}
+
+interface MeasureBaseline {
+  timestamp: number;
+  counts: Record<string, number>;
 }
 
 const defaults: Settings = {
@@ -169,23 +181,28 @@ function isSupported(): boolean {
 
 /** Samples the JS heap and reports one leak or high-usage event per session. */
 export class MemoryMonitor {
-  log: LogFn;
-  getTabCount: (() => number) | undefined;
-  settings: Settings;
-  measures: Record<string, number> = {};
-  isMonitoring = false;
-  snapshots: HeapSnapshot[] = [];
-  measureBaselines: MeasureBaseline[] = [];
-  hasWarnedAboutLeak = false;
-  hasWarnedAboutUsage = false;
-  intervalId: ReturnType<typeof setInterval> | undefined;
-  potentialLeak: MemoryLeak | undefined;
+  private log: LogFn;
+  private getTabCount: (() => number) | undefined;
+  private settings: Settings;
+  private measures: Record<string, number> = {};
+  private monitoring = false;
+  private snapshots: HeapSnapshot[] = [];
+  private measureBaselines: MeasureBaseline[] = [];
+  private hasWarnedAboutLeak = false;
+  private hasWarnedAboutUsage = false;
+  private intervalId: ReturnType<typeof setInterval> | undefined;
+  private potentialLeak: MemoryLeak | undefined;
 
   constructor(options: MemoryMonitorOptions) {
     const { log, getTabCount, ...settings } = options;
     this.log = log;
     this.getTabCount = getTabCount;
     this.settings = { ...defaults, ...settings };
+  }
+
+  /** Whether the sampling interval is currently running. */
+  get isMonitoring(): boolean {
+    return this.monitoring;
   }
 
   /** Replace the measured counts included in leak reports. */
@@ -195,9 +212,9 @@ export class MemoryMonitor {
 
   /** Start sampling. Later calls are no-ops while already running. */
   start(): void {
-    if (!isSupported() || this.isMonitoring) return;
+    if (!isSupported() || this.monitoring) return;
 
-    this.isMonitoring = true;
+    this.monitoring = true;
     this.intervalId = setInterval(
       () => this.runMemoryCheck(),
       this.settings.measurementIntervalMs,
@@ -206,10 +223,10 @@ export class MemoryMonitor {
 
   /** Stop sampling. */
   stop(): void {
-    if (!this.isMonitoring) return;
+    if (!this.monitoring) return;
     clearInterval(this.intervalId);
     this.intervalId = undefined;
-    this.isMonitoring = false;
+    this.monitoring = false;
   }
 
   /** Latest heap reading and the leak detected for the current window, if any. */
@@ -221,7 +238,7 @@ export class MemoryMonitor {
   }
 
   /** Record one sample, drop readings older than the sliding window, and report the first leak or high-usage event. */
-  runMemoryCheck(): void {
+  private runMemoryCheck(): void {
     try {
       const usedMb = usedJsHeapSizeMb();
       if (usedMb === undefined) return;
@@ -242,7 +259,7 @@ export class MemoryMonitor {
       if (this.potentialLeak && !this.hasWarnedAboutLeak) {
         const metadata = this.reportMetadata(usedMb);
 
-        this.log("Detected potential memory leak", {
+        this.log(MEMORY_EVENT.LEAK, {
           ...metadata,
           leak: this.potentialLeak,
           heapSizeHistory: this.serializeHeapHistory(now),
@@ -255,7 +272,7 @@ export class MemoryMonitor {
         !this.hasWarnedAboutUsage &&
         this.settings.reportHighUsage
       ) {
-        this.log("High memory usage", {
+        this.log(MEMORY_EVENT.HIGH_USAGE, {
           threshold: this.settings.highUsageMb,
           ...this.reportMetadata(usedMb),
         });
@@ -264,7 +281,7 @@ export class MemoryMonitor {
     } catch {}
   }
 
-  reportMetadata(usedMb: number): ReportMetadata {
+  private reportMetadata(usedMb: number): ReportMetadata {
     const metadata: ReportMetadata = {
       usedJSHeapSizeMb: usedMb,
       sessionDurationMinutes: Math.round(performance.now() / MINUTE),
@@ -280,7 +297,7 @@ export class MemoryMonitor {
   }
 
   /** Keep two measure samples, at least half a sliding window apart. */
-  updateMeasureBaseline(now: number): void {
+  private updateMeasureBaseline(now: number): void {
     const latest = this.measureBaselines[this.measureBaselines.length - 1];
 
     if (latest && now - latest.timestamp < this.settings.slidingWindowMs / 2) {
@@ -298,11 +315,12 @@ export class MemoryMonitor {
   }
 
   /** Largest measure changes since the oldest baseline, at most `maxMeasureDeltas`. */
-  computeMeasureGrowth(
+  private computeMeasureGrowth(
     now: number,
     counts: Record<string, number>,
   ): MeasureGrowth | undefined {
     const baseline = this.measureBaselines[0];
+    /* c8 ignore next */
     if (!baseline) return;
     const deltas: [string, number][] = [];
     for (const [name, count] of Object.entries(counts)) {
@@ -319,7 +337,7 @@ export class MemoryMonitor {
   }
 
   /** About `maxHeapHistoryPoints` from the current window, oldest first, always including the latest sample. */
-  serializeHeapHistory(now: number): HeapHistoryPoint[] {
+  private serializeHeapHistory(now: number): HeapHistoryPoint[] {
     const stride = Math.max(
       1,
       Math.ceil(this.snapshots.length / this.settings.maxHeapHistoryPoints),

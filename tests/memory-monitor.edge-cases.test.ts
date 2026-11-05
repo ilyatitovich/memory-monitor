@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
-import { afterEach, describe, it } from "node:test";
-import { detectMemoryLeak, MemoryMonitor } from "../index.ts";
-import type { HeapSnapshot } from "../index.ts";
+import { afterEach, describe, it, mock } from "node:test";
+import { detectMemoryLeak, MEMORY_EVENT, MemoryMonitor } from "../index.ts";
+import type { HeapHistoryPoint, HeapSnapshot, MeasureGrowth } from "../index.ts";
 import {
   createLogMock,
+  enableIntervalTimers,
   installChromeHeap,
   installClock,
   resetGlobals,
+  TEST_INTERVAL_MS,
+  tickInterval,
 } from "./test-helpers.ts";
 
 const MINUTE = 60_000;
@@ -19,7 +22,11 @@ function snapshots(points: [number, number][]): HeapSnapshot[] {
 }
 
 describe("real-world memory sessions", { concurrency: false }, () => {
-  afterEach(resetGlobals);
+  afterEach(() => {
+    mock.timers.reset();
+    resetGlobals();
+  });
+
   it("a large workspace that hydrates then GCs is not a leak", () => {
     // Bootstrap pulls ~1.7GB into heap, then idle GC flattens it.
     const leak = detectMemoryLeak(
@@ -57,28 +64,27 @@ describe("real-world memory sessions", { concurrency: false }, () => {
     const { log, calls } = createLogMock();
     const monitor = new MemoryMonitor({
       log,
+      measurementIntervalMs: TEST_INTERVAL_MS,
       getTabCount: () => 4,
     });
 
     const live = { cacheEntries: 8_000, listeners: 20_000 };
     monitor.setMeasures(live);
+    enableIntervalTimers();
+    monitor.start();
 
     for (let minute = 0; minute <= 8; minute++) {
       live.cacheEntries = 8_000 + minute * 6_000;
       live.listeners = 20_000 + minute * 2_000;
       monitor.setMeasures({ ...live });
       heap.setMb(400 + minute * 280);
-      monitor.runMemoryCheck();
+      tickInterval();
       clock.add(MINUTE);
     }
 
-    const report = calls.find(
-      (call) => call.message === "Detected potential memory leak",
-    );
+    const report = calls.find((call) => call.message === MEMORY_EVENT.LEAK);
     assert.ok(report);
-    const growth = report.metadata.measureGrowth as {
-      counts: Record<string, number>;
-    };
+    const growth = report.metadata.measureGrowth as MeasureGrowth;
     const cacheDelta = growth.counts.cacheEntries;
     const listenerDelta = growth.counts.listeners;
     assert.ok(cacheDelta !== undefined && listenerDelta !== undefined);
@@ -96,13 +102,16 @@ describe("real-world memory sessions", { concurrency: false }, () => {
     const { log, calls } = createLogMock();
     const monitor = new MemoryMonitor({
       log,
+      measurementIntervalMs: TEST_INTERVAL_MS,
       getTabCount: () => 8,
     });
     const measures = { cacheEntries: 4200, listeners: 18_000 };
     monitor.setMeasures(measures);
-    monitor.runMemoryCheck();
+    enableIntervalTimers();
+    monitor.start();
+    tickInterval();
 
-    assert.equal(calls[0]?.message, "High memory usage");
+    assert.equal(calls[0]?.message, MEMORY_EVENT.HIGH_USAGE);
     assert.equal(calls[0]?.metadata.tabVisible, false);
     assert.equal(calls[0]?.metadata.tabCount, 8);
     assert.deepEqual(calls[0]?.metadata.measures, measures);
@@ -113,18 +122,23 @@ describe("real-world memory sessions", { concurrency: false }, () => {
     const heap = installChromeHeap({ mb: 2400 });
     const clock = installClock(0);
     const { log, calls } = createLogMock();
-    const monitor = new MemoryMonitor({ log });
+    const monitor = new MemoryMonitor({
+      log,
+      measurementIntervalMs: TEST_INTERVAL_MS,
+    });
+    enableIntervalTimers();
+    monitor.start();
 
-    monitor.runMemoryCheck();
+    tickInterval();
     heap.setMb(2510);
     clock.add(10_000);
-    monitor.runMemoryCheck();
+    tickInterval();
     heap.setMb(2700);
     clock.add(10_000);
-    monitor.runMemoryCheck();
+    tickInterval();
 
     assert.equal(
-      calls.filter((call) => call.message === "High memory usage").length,
+      calls.filter((call) => call.message === MEMORY_EVENT.HIGH_USAGE).length,
       1,
     );
     heap.restore();
@@ -136,9 +150,12 @@ describe("real-world memory sessions", { concurrency: false }, () => {
     const { log, calls } = createLogMock();
     const monitor = new MemoryMonitor({
       log,
+      measurementIntervalMs: TEST_INTERVAL_MS,
       reportHighUsage: false,
     });
-    monitor.runMemoryCheck();
+    enableIntervalTimers();
+    monitor.start();
+    tickInterval();
     assert.equal(calls.length, 0);
     heap.restore();
   });
@@ -146,19 +163,28 @@ describe("real-world memory sessions", { concurrency: false }, () => {
   it("only the last 10 minutes of heap stay in the window during an overnight tab", () => {
     const heap = installChromeHeap({ mb: 500 });
     const clock = installClock(0);
-    const { log } = createLogMock();
-    const monitor = new MemoryMonitor({ log });
+    const { log, calls } = createLogMock();
+    const monitor = new MemoryMonitor({
+      log,
+      measurementIntervalMs: TEST_INTERVAL_MS,
+    });
+    enableIntervalTimers();
+    monitor.start();
 
     for (let minute = 0; minute <= 15; minute++) {
-      heap.setMb(500 + minute);
-      monitor.runMemoryCheck();
+      heap.setMb(100 + minute * 200);
+      tickInterval();
       clock.add(MINUTE);
     }
 
-    const oldest = monitor.snapshots[0];
-    const newest = monitor.snapshots[monitor.snapshots.length - 1];
-    assert.ok(oldest && newest);
-    assert.ok(newest.timestamp - oldest.timestamp <= 10 * MINUTE);
+    const report = calls.find((call) => call.message === MEMORY_EVENT.LEAK);
+    assert.ok(report);
+    const history = report.metadata.heapSizeHistory as HeapHistoryPoint[];
+    assert.ok(history.length >= 2);
+    const oldestMinutesAgo = Math.max(
+      ...history.map((point) => point.minutesAgo),
+    );
+    assert.ok(oldestMinutesAgo <= 10);
     heap.restore();
     clock.restore();
   });
@@ -166,10 +192,15 @@ describe("real-world memory sessions", { concurrency: false }, () => {
   it("dozens of measure keys only ship the largest deltas", () => {
     const heap = installChromeHeap({ mb: 100 });
     const clock = installClock(0);
-    const { log } = createLogMock();
+    const { log, calls } = createLogMock();
     const monitor = new MemoryMonitor({
       log,
+      measurementIntervalMs: TEST_INTERVAL_MS,
       maxMeasureDeltas: 3,
+      minLeakSamples: 3,
+      minWindowCoverageMs: 5 * MINUTE,
+      leakGrowthMb: 200,
+      sustainedGrowthMbPerSecond: 0,
     });
 
     const before: Record<string, number> = {};
@@ -179,14 +210,24 @@ describe("real-world memory sessions", { concurrency: false }, () => {
       before[name] = 10;
       after[name] = 10 + index;
     }
+    enableIntervalTimers();
+    monitor.start();
     monitor.setMeasures(before);
-    monitor.runMemoryCheck();
-    clock.add(5 * MINUTE);
+    tickInterval();
+    clock.add(2.5 * MINUTE);
+    heap.setMb(200);
+    tickInterval();
+    clock.add(2.5 * MINUTE);
     monitor.setMeasures(after);
-    monitor.runMemoryCheck();
+    heap.setMb(400);
+    tickInterval();
 
-    const growth = monitor.computeMeasureGrowth(clock.value(), after);
-    assert.deepEqual(growth?.counts, {
+    const leakLogs = calls.filter(
+      (call) => call.message === MEMORY_EVENT.LEAK,
+    );
+    assert.equal(leakLogs.length, 1);
+    const growth = leakLogs[0]?.metadata.measureGrowth as MeasureGrowth;
+    assert.deepEqual(growth.counts, {
       metric29: 29,
       metric28: 28,
       metric27: 27,
@@ -221,19 +262,22 @@ describe("real-world memory sessions", { concurrency: false }, () => {
     const { log, calls } = createLogMock();
     const monitor = new MemoryMonitor({
       log,
+      measurementIntervalMs: TEST_INTERVAL_MS,
       getTabCount: () => 1,
     });
     monitor.setMeasures({ cacheEntries: 4200, listeners: 18_000 });
+    enableIntervalTimers();
+    monitor.start();
 
     for (let minute = 0; minute <= 6; minute++) {
       heap.setMb(100 + minute * 450);
-      monitor.runMemoryCheck();
+      tickInterval();
       clock.add(MINUTE);
     }
 
     const messages = calls.map((call) => call.message);
-    assert.ok(messages.includes("Detected potential memory leak"));
-    assert.ok(messages.includes("High memory usage"));
+    assert.ok(messages.includes(MEMORY_EVENT.LEAK));
+    assert.ok(messages.includes(MEMORY_EVENT.HIGH_USAGE));
     heap.restore();
     clock.restore();
   });

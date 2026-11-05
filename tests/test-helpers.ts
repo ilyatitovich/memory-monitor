@@ -3,6 +3,9 @@ import type { LogFn } from "../index.ts";
 
 const MB = 1024 * 1024;
 
+/** Short interval used by monitor tests so samples are easy to tick. */
+export const TEST_INTERVAL_MS = 1_000;
+
 const originalDateNow = Date.now;
 const originalGlobals = {
   window: Object.getOwnPropertyDescriptor(globalThis, "window"),
@@ -73,14 +76,16 @@ export function installChromeHeap(options: HeapOptions = {}): {
   setMb(mb: number): void;
   setBytes(next: number): void;
   setVisibility(state: string): void;
+  setThrowOnRead(value: boolean): void;
   restore(): void;
 } {
   let bytes =
     options.bytes ?? (options.mb !== undefined ? options.mb * MB : 100 * MB);
+  let throwOnRead = options.throwOnMemory ?? false;
 
   const memory = {
     get usedJSHeapSize(): number {
-      if (options.throwOnMemory) throw new Error("memory probe failed");
+      if (throwOnRead) throw new Error("memory probe failed");
       return bytes;
     },
   };
@@ -126,12 +131,25 @@ export function installChromeHeap(options: HeapOptions = {}): {
     setVisibility(state: string): void {
       document.visibilityState = state;
     },
+    setThrowOnRead(value: boolean): void {
+      throwOnRead = value;
+    },
     restore(): void {
       restoreDescriptor("window", previous.window);
       restoreDescriptor("performance", previous.performance);
       restoreDescriptor("self", previous.self);
     },
   };
+}
+
+/** Enable fake `setInterval` so tests can advance samples with {@link tickInterval}. */
+export function enableIntervalTimers(): void {
+  mock.timers.enable({ apis: ["setInterval"] });
+}
+
+/** Fire the next monitor sample (call after {@link MemoryMonitor.start}). */
+export function tickInterval(ms = TEST_INTERVAL_MS): void {
+  mock.timers.tick(ms);
 }
 
 function restoreDescriptor(
