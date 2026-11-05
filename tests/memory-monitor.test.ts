@@ -367,6 +367,64 @@ describe("MemoryMonitor", { concurrency: false }, () => {
     heap.restore();
   });
 
+  it("retries high-usage report when log throws on the first attempt", () => {
+    const heap = installChromeHeap({ mb: 2600 });
+    const calls: { message: string; metadata: Record<string, unknown> }[] = [];
+    let failNext = true;
+    const monitor = new MemoryMonitor({
+      log(message, metadata) {
+        if (failNext) {
+          failNext = false;
+          throw new Error("sink unavailable");
+        }
+        calls.push({ message, metadata });
+      },
+    });
+
+    assert.doesNotThrow(() => monitor.runMemoryCheck());
+    assert.equal(monitor.hasWarnedAboutUsage, false);
+    assert.equal(calls.length, 0);
+
+    monitor.runMemoryCheck();
+    assert.equal(monitor.hasWarnedAboutUsage, true);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]?.message, "High memory usage");
+    heap.restore();
+  });
+
+  it("retries leak report when getTabCount throws on the first attempt", () => {
+    const heap = installChromeHeap({ mb: 100 });
+    const clock = installClock(0);
+    const { log, calls } = createLogMock();
+    let failNext = true;
+    const monitor = new MemoryMonitor({
+      log,
+      getTabCount() {
+        if (failNext) {
+          failNext = false;
+          throw new Error("tabs unavailable");
+        }
+        return 2;
+      },
+    });
+
+    for (let step = 0; step <= 5; step++) {
+      heap.setMb(100 + step * 300);
+      assert.doesNotThrow(() => monitor.runMemoryCheck());
+      clock.add(MINUTE);
+    }
+
+    assert.equal(monitor.hasWarnedAboutLeak, false);
+    assert.equal(calls.length, 0);
+
+    monitor.runMemoryCheck();
+    assert.equal(monitor.hasWarnedAboutLeak, true);
+    assert.equal(calls[0]?.message, "Detected potential memory leak");
+    assert.equal(calls[0]?.metadata.tabCount, 2);
+    heap.restore();
+    clock.restore();
+  });
+
   it("does not log high usage at the threshold or when reporting is off", () => {
     const heap = installChromeHeap({ mb: 2500 });
     const { log, calls } = createLogMock();

@@ -224,45 +224,46 @@ export class MemoryMonitor {
 
   /** Record one sample, drop readings older than the sliding window, and report the first leak or high-usage event. */
   runMemoryCheck(): void {
-    const usedMb = usedJsHeapSizeMb();
-    if (usedMb === undefined) return;
+    try {
+      const usedMb = usedJsHeapSizeMb();
+      if (usedMb === undefined) return;
 
-    const now = Date.now();
-    this.snapshots.push({ timestamp: now, usedJSHeapSizeMb: usedMb });
+      const now = Date.now();
+      this.snapshots.push({ timestamp: now, usedJSHeapSizeMb: usedMb });
 
-    while (
-      this.snapshots[0] !== undefined &&
-      this.snapshots[0].timestamp < now - this.settings.slidingWindowMs
-    ) {
-      this.snapshots.shift();
-    }
+      while (
+        this.snapshots[0] !== undefined &&
+        this.snapshots[0].timestamp < now - this.settings.slidingWindowMs
+      ) {
+        this.snapshots.shift();
+      }
 
-    this.updateMeasureBaseline(now);
-    this.potentialLeak = detectMemoryLeak(this.snapshots, this.settings);
+      this.updateMeasureBaseline(now);
+      this.potentialLeak = detectMemoryLeak(this.snapshots, this.settings);
 
-    if (this.potentialLeak && !this.hasWarnedAboutLeak) {
-      this.hasWarnedAboutLeak = true;
-      const metadata = this.reportMetadata(usedMb);
+      if (this.potentialLeak && !this.hasWarnedAboutLeak) {
+        const metadata = this.reportMetadata(usedMb);
 
-      this.log("Detected potential memory leak", {
-        ...metadata,
-        leak: this.potentialLeak,
-        heapSizeHistory: this.serializeHeapHistory(now),
-        measureGrowth: this.computeMeasureGrowth(now, metadata.measures),
-      });
-    }
-    if (
-      usedMb > this.settings.highUsageMb &&
-      !this.hasWarnedAboutUsage &&
-      this.settings.reportHighUsage
-    ) {
-      this.hasWarnedAboutUsage = true;
-
-      this.log("High memory usage", {
-        threshold: this.settings.highUsageMb,
-        ...this.reportMetadata(usedMb),
-      });
-    }
+        this.log("Detected potential memory leak", {
+          ...metadata,
+          leak: this.potentialLeak,
+          heapSizeHistory: this.serializeHeapHistory(now),
+          measureGrowth: this.computeMeasureGrowth(now, metadata.measures),
+        });
+        this.hasWarnedAboutLeak = true;
+      }
+      if (
+        usedMb > this.settings.highUsageMb &&
+        !this.hasWarnedAboutUsage &&
+        this.settings.reportHighUsage
+      ) {
+        this.log("High memory usage", {
+          threshold: this.settings.highUsageMb,
+          ...this.reportMetadata(usedMb),
+        });
+        this.hasWarnedAboutUsage = true;
+      }
+    } catch {}
   }
 
   reportMetadata(usedMb: number): ReportMetadata {
