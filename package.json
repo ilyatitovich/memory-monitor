@@ -2,6 +2,7 @@
   "name": "memory-monitor",
   "version": "1.0.0",
   "type": "module",
+  "packageManager": "pnpm@12.16.1",
   "description": "A library for monitoring memory usage and detecting memory leaks.",
   "license": "MIT",
   "keywords": [
