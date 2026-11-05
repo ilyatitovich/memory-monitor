@@ -25,9 +25,11 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --ignore-scripts --frozen-lockfile
-      - name: Typecheck
-        run: pnpm run typecheck
+      - name: Lint (typecheck)
+        run: pnpm run lint
       - name: Build
         run: pnpm run build
       - name: Test
         run: pnpm test
+      - name: Production dependency audit
+        run: pnpm run audit:prod

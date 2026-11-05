@@ -38,9 +38,21 @@ monitor.start();
 
 // Later…
 monitor.stop();
+
+// Re-arm one-shot alerts and clear sample history for a new session
+monitor.reset();
+monitor.start();
 ```
 
 `start()` is a no-op when already running, or when Chrome’s `performance.memory` API is unavailable (for example Firefox). There is no separate “unsupported” callback — check support yourself if you need a signal.
+
+Import `THRESHOLD_PRESETS.catastrophic` (defaults) or `THRESHOLD_PRESETS.sensitive` when you want earlier warnings and can tolerate more noise:
+
+```ts
+import { MemoryMonitor, THRESHOLD_PRESETS } from "memory-monitor";
+
+new MemoryMonitor({ log, ...THRESHOLD_PRESETS.sensitive });
+```
 
 ## Browser support
 
@@ -54,14 +66,14 @@ monitor.stop();
 
 ## One-shot semantics
 
-Each `MemoryMonitor` instance emits:
+Each armed session emits:
 
 - **at most one** `"Detected potential memory leak"` event
 - **at most one** `"High memory usage"` event (if `reportHighUsage` is enabled)
 
-After a successful `log` call, that event type will not fire again for the life of the instance — even if you `stop()` and `start()` again. Snapshot history and warn flags persist across stop/start. Construct a new instance (or clear state yourself) if you need another armed session.
+`stop()` only clears the sampling timer. Snapshot history and warn flags persist across `stop()` / `start()`, so alerts stay one-shot for that session. Call `reset()` to clear samples, baselines, detected leak state, and warn flags and begin a new armed session (with or without stopping first).
 
-If `log`, `getTabCount`, or metadata access throws, the tick is caught and the corresponding one-shot flag is **not** set, so the next successful tick can still report.
+If `log` or `getTabCount` throws, the tick is caught and the corresponding one-shot flag is **not** set, so the next successful tick can still report. Missing `document` is treated as `tabVisible: false` without dropping the report.
 
 ## Settings
 
@@ -133,11 +145,16 @@ A leak is reported when the sliding window has enough samples and coverage, tota
 | Member | Role |
 | --- | --- |
 | `new MemoryMonitor({ log, getTabCount?, …settings })` | Create a monitor |
-| `setMeasures(counts)` | Replace app counters included in reports |
-| `start()` / `stop()` | Begin or end sampling |
+| `setMeasures(counts)` | Replace app counters included in reports (copied) |
+| `start()` / `stop()` | Begin or end sampling (`stop` keeps session state) |
+| `reset()` | Clear samples, baselines, and one-shot flags |
 | `getMemoryInfo()` | `{ memoryUsage, leak }` for the current window |
+| `MEMORY_EVENT` | Stable log message strings (`LEAK`, `HIGH_USAGE`) |
+| `THRESHOLD_PRESETS` | `catastrophic` (defaults) and `sensitive` packs |
 | `usedJsHeapSizeMb()` | Read Chrome heap size in MB, or `undefined` |
 | `detectMemoryLeak(snapshots, settings?)` | Pure leak check used by the monitor |
+
+Design notes and portfolio case studies: [DESIGN.md](./DESIGN.md).
 
 ## Development
 

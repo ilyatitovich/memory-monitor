@@ -29,8 +29,10 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tests/tsconfig.json",
+    "lint": "tsc -p tsconfig.json --noEmit && tsc -p tests/tsconfig.json",
     "test": "c8 --100 bnt",
-    "prepack": "npm run build && npm test"
+    "audit:prod": "pnpm audit --prod --audit-level=high",
+    "prepack": "pnpm run build && pnpm test"
   },
   "c8": {
     "extension": [

@@ -4,6 +4,7 @@ import {
   detectMemoryLeak,
   MEMORY_EVENT,
   MemoryMonitor,
+  THRESHOLD_PRESETS,
   usedJsHeapSizeMb,
 } from "../index.ts";
 import type { HeapHistoryPoint, HeapSnapshot, MeasureGrowth } from "../index.ts";
@@ -201,6 +202,15 @@ describe("detectMemoryLeak", () => {
     assert.equal(leak?.growthMb, 10);
     assert.equal(leak?.windowCoverageMinutes, 0);
   });
+
+  it("exposes catastrophic and sensitive threshold presets", () => {
+    assert.equal(THRESHOLD_PRESETS.catastrophic.highUsageMb, 2500);
+    assert.ok(
+      THRESHOLD_PRESETS.sensitive.leakGrowthMb <
+        THRESHOLD_PRESETS.catastrophic.leakGrowthMb,
+    );
+    assert.ok(detectMemoryLeak(climbingLeak, THRESHOLD_PRESETS.sensitive));
+  });
 });
 
 describe("MemoryMonitor", { concurrency: false }, () => {
@@ -228,6 +238,73 @@ describe("MemoryMonitor", { concurrency: false }, () => {
     assert.equal(calls[0]?.metadata.threshold, 800);
     assert.equal(calls[0]?.metadata.tabCount, 2);
     assert.deepEqual(calls[0]?.metadata.measures, measures);
+    heap.restore();
+  });
+
+  it("ignores undefined settings overrides so defaults stay intact", () => {
+    const heap = installChromeHeap({ mb: 2400 });
+    const { log, calls } = createLogMock();
+    const monitor = new MemoryMonitor({
+      log,
+      highUsageMb: undefined,
+      measurementIntervalMs: TEST_INTERVAL_MS,
+    });
+    enableIntervalTimers();
+    monitor.start();
+    tickInterval();
+
+    assert.equal(calls.length, 0);
+    heap.setMb(2501);
+    tickInterval();
+    assert.equal(calls[0]?.message, MEMORY_EVENT.HIGH_USAGE);
+    assert.equal(calls[0]?.metadata.threshold, 2500);
+    heap.restore();
+  });
+
+  it("rejects non-positive measurement and sliding-window intervals", () => {
+    const { log } = createLogMock();
+    assert.throws(
+      () => new MemoryMonitor({ log, measurementIntervalMs: 0 }),
+      {
+        name: "RangeError",
+        message: "measurementIntervalMs must be a positive number",
+      },
+    );
+    assert.throws(
+      () => new MemoryMonitor({ log, measurementIntervalMs: Number.NaN }),
+      {
+        name: "RangeError",
+        message: "measurementIntervalMs must be a positive number",
+      },
+    );
+    assert.throws(
+      () => new MemoryMonitor({ log, slidingWindowMs: -1 }),
+      {
+        name: "RangeError",
+        message: "slidingWindowMs must be a positive number",
+      },
+    );
+  });
+
+  it("copies measures on set and in report metadata", () => {
+    const heap = installChromeHeap({ mb: 2600 });
+    const { log, calls } = createLogMock();
+    const measures = { cacheEntries: 10 };
+    const monitor = new MemoryMonitor({
+      log,
+      measurementIntervalMs: TEST_INTERVAL_MS,
+    });
+    monitor.setMeasures(measures);
+    measures.cacheEntries = 999;
+    enableIntervalTimers();
+    monitor.start();
+    tickInterval();
+
+    const reported = calls[0]?.metadata.measures as Record<string, number>;
+    assert.deepEqual(reported, { cacheEntries: 10 });
+    assert.notEqual(reported, measures);
+    reported.cacheEntries = 42;
+    assert.equal(measures.cacheEntries, 999);
     heap.restore();
   });
 
@@ -433,7 +510,7 @@ describe("MemoryMonitor", { concurrency: false }, () => {
     assert.equal(leakLogs[0]?.metadata.tabCount, 3);
     assert.equal(leakLogs[0]?.metadata.tabVisible, true);
     assert.equal(leakLogs[0]?.metadata.usedJSHeapSizeMb, 1600);
-    assert.equal(leakLogs[0]?.metadata.sessionDurationMinutes, 2);
+    assert.equal(leakLogs[0]?.metadata.sessionDurationMinutes, 5);
     const leak = leakLogs[0]?.metadata.leak as { growthMb: number };
     assert.equal(leak.growthMb, 1500);
     const growth = leakLogs[0]?.metadata.measureGrowth as MeasureGrowth;
@@ -700,5 +777,172 @@ describe("MemoryMonitor", { concurrency: false }, () => {
     tickInterval();
     assert.equal(calls[0]?.metadata.tabVisible, false);
     heap.restore();
+  });
+
+  it("treats missing document as not visible without losing the report", () => {
+    const heap = installChromeHeap({ mb: 2600 });
+    Reflect.deleteProperty(globalThis, "self");
+    const { log, calls } = createLogMock();
+    const monitor = new MemoryMonitor({
+      log,
+      measurementIntervalMs: TEST_INTERVAL_MS,
+    });
+    enableIntervalTimers();
+    monitor.start();
+    tickInterval();
+    assert.equal(calls[0]?.message, MEMORY_EVENT.HIGH_USAGE);
+    assert.equal(calls[0]?.metadata.tabVisible, false);
+    heap.restore();
+  });
+
+  it("stop keeps one-shot state; reset re-arms alerts for a new session", () => {
+    const heap = installChromeHeap({ mb: 2600 });
+    const { log, calls } = createLogMock();
+    const monitor = new MemoryMonitor({
+      log,
+      measurementIntervalMs: TEST_INTERVAL_MS,
+    });
+    enableIntervalTimers();
+    monitor.start();
+    tickInterval();
+    assert.equal(calls.length, 1);
+    monitor.stop();
+    assert.equal(monitor.isMonitoring, false);
+
+    monitor.start();
+    tickInterval();
+    assert.equal(calls.length, 1);
+
+    monitor.stop();
+    monitor.reset();
+    assert.equal(monitor.getMemoryInfo().leak, undefined);
+    monitor.start();
+    tickInterval();
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1]?.message, MEMORY_EVENT.HIGH_USAGE);
+    heap.restore();
+  });
+
+  it("does not treat Object.prototype keys as baseline measure counts", () => {
+    const heap = installChromeHeap({ mb: 100 });
+    const clock = installClock(0);
+    const { log, calls } = createLogMock();
+    const monitor = new MemoryMonitor({
+      log,
+      measurementIntervalMs: TEST_INTERVAL_MS,
+      minLeakSamples: 3,
+      minWindowCoverageMs: 5 * MINUTE,
+      leakGrowthMb: 200,
+      sustainedGrowthMbPerSecond: 0,
+    });
+    enableIntervalTimers();
+    monitor.start();
+
+    monitor.setMeasures({ cacheEntries: 1 });
+    tickInterval();
+    clock.add(2.5 * MINUTE);
+    heap.setMb(200);
+    tickInterval();
+    clock.add(2.5 * MINUTE);
+    monitor.setMeasures({ cacheEntries: 1, toString: 4 });
+    heap.setMb(400);
+    tickInterval();
+
+    const leakLogs = calls.filter(
+      (call) => call.message === MEMORY_EVENT.LEAK,
+    );
+    assert.equal(leakLogs.length, 1);
+    const growth = leakLogs[0]?.metadata.measureGrowth as MeasureGrowth;
+    assert.equal(growth.counts.toString, 4);
+    heap.restore();
+    clock.restore();
+  });
+
+  it("falls back to Date.now when performance.now is unavailable", () => {
+    const clock = installClock(3 * MINUTE);
+    const memory = { usedJSHeapSize: 2600 * MB };
+    Object.defineProperty(globalThis, "performance", {
+      value: { memory },
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(globalThis, "window", {
+      value: { performance: { memory } },
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(globalThis, "self", {
+      value: { document: { visibilityState: "visible" } },
+      configurable: true,
+      writable: true,
+    });
+    const { log, calls } = createLogMock();
+    const monitor = new MemoryMonitor({
+      log,
+      measurementIntervalMs: TEST_INTERVAL_MS,
+    });
+    enableIntervalTimers();
+    monitor.start();
+    tickInterval();
+    assert.equal(calls[0]?.message, MEMORY_EVENT.HIGH_USAGE);
+    assert.equal(calls[0]?.metadata.sessionDurationMinutes, 3);
+
+    Object.defineProperty(globalThis, "performance", {
+      value: {
+        memory,
+        now() {
+          throw new Error("now failed");
+        },
+      },
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(globalThis, "window", {
+      value: { performance: globalThis.performance },
+      configurable: true,
+      writable: true,
+    });
+    monitor.reset();
+    tickInterval();
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1]?.metadata.sessionDurationMinutes, 3);
+    clock.restore();
+  });
+
+  it("evicts snapshots after the clock jumps backward within the window math", () => {
+    const heap = installChromeHeap({ mb: 100 });
+    const clock = installClock(10 * MINUTE);
+    const { log, calls } = createLogMock();
+    const monitor = new MemoryMonitor({
+      log,
+      measurementIntervalMs: TEST_INTERVAL_MS,
+      slidingWindowMs: MINUTE,
+      minLeakSamples: 3,
+      minWindowCoverageMs: 30_000,
+      leakGrowthMb: 200,
+      sustainedGrowthMbPerSecond: 0,
+    });
+    enableIntervalTimers();
+    monitor.start();
+
+    tickInterval();
+    clock.set(0);
+    heap.setMb(200);
+    tickInterval();
+    clock.add(30_000);
+    heap.setMb(350);
+    tickInterval();
+    clock.add(30_000);
+    heap.setMb(500);
+    tickInterval();
+
+    const leakLogs = calls.filter(
+      (call) => call.message === MEMORY_EVENT.LEAK,
+    );
+    assert.equal(leakLogs.length, 1);
+    const history = leakLogs[0]?.metadata.heapSizeHistory as HeapHistoryPoint[];
+    assert.ok(history.every((point) => point.minutesAgo >= 0));
+    heap.restore();
+    clock.restore();
   });
 });

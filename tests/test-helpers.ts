@@ -90,9 +90,10 @@ export function installChromeHeap(options: HeapOptions = {}): {
     },
   };
 
+  // Delegate to Date.now so {@link installClock} drives both wall and monotonic sample time.
   const performanceLike = {
     now(): number {
-      return 90_000;
+      return Date.now();
     },
     memory,
   };

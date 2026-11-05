@@ -44,7 +44,12 @@ export interface Settings {
   reportHighUsage: boolean;
 }
 
-export interface MemoryMonitorOptions extends Partial<Settings> {
+/** Allows omitting keys or passing explicit `undefined` without wiping defaults. */
+export type SettingsOverrides = {
+  [K in keyof Settings]?: Settings[K] | undefined;
+};
+
+export interface MemoryMonitorOptions extends SettingsOverrides {
   log: LogFn;
   getTabCount?: () => number;
 }
@@ -87,6 +92,61 @@ const defaults: Settings = {
   maxHeapHistoryPoints: 20,
   reportHighUsage: true,
 };
+
+/**
+ * Named threshold packs for common trade-offs.
+ * `catastrophic` matches the built-in defaults (near tab-crash scale).
+ * `sensitive` lowers bars for earlier warnings at the cost of more false positives.
+ */
+export const THRESHOLD_PRESETS = {
+  catastrophic: { ...defaults },
+  sensitive: {
+    ...defaults,
+    highUsageMb: 1000,
+    leakGrowthMb: 500,
+    sustainedGrowthMbPerSecond: 0.25,
+  },
+} as const satisfies Record<string, Settings>;
+
+/** Merge overrides onto defaults, skipping explicit `undefined` so it does not wipe a default. */
+function mergeSettings(overrides: SettingsOverrides = {}): Settings {
+  return {
+    ...defaults,
+    ...Object.fromEntries(
+      Object.entries(overrides).filter(([, value]) => value !== undefined),
+    ),
+  };
+}
+
+function assertPositiveInterval(ms: number, name: keyof Settings): void {
+  if (!(ms > 0)) {
+    throw new RangeError(`${name} must be a positive number`);
+  }
+}
+
+/** Monotonic timestamp when available; falls back to wall clock. */
+function sampleTimestampMs(): number {
+  try {
+    if (
+      typeof performance !== "undefined" &&
+      typeof performance.now === "function"
+    ) {
+      return performance.now();
+    }
+  } catch {}
+  return Date.now();
+}
+
+function copyCounts(counts: Record<string, number>): Record<string, number> {
+  return Object.assign(Object.create(null), counts) as Record<string, number>;
+}
+
+function baselineCount(
+  counts: Record<string, number>,
+  name: string,
+): number {
+  return Object.hasOwn(counts, name) ? counts[name]! : 0;
+}
 
 /**
  * Chrome heap size in megabytes, rounded to the nearest megabyte.
@@ -143,14 +203,14 @@ function heapGrowthMbPerSecond(snapshots: HeapSnapshot[]): number {
  */
 export function detectMemoryLeak(
   snapshots: HeapSnapshot[],
-  settings: Partial<Settings> = {},
+  settings: SettingsOverrides = {},
 ): MemoryLeak | undefined {
   const {
     minLeakSamples,
     minWindowCoverageMs,
     leakGrowthMb,
     sustainedGrowthMbPerSecond,
-  } = { ...defaults, ...settings };
+  } = mergeSettings(settings);
 
   if (snapshots.length < minLeakSamples) return;
 
@@ -179,12 +239,16 @@ function isSupported(): boolean {
   return usedJsHeapSizeMb() !== undefined;
 }
 
-/** Samples the JS heap and reports one leak or high-usage event per session. */
+/**
+ * Samples the JS heap and reports one leak or high-usage event per armed session.
+ * Call {@link MemoryMonitor.reset} to clear samples and re-arm one-shot alerts;
+ * {@link MemoryMonitor.stop} only clears the sampling timer.
+ */
 export class MemoryMonitor {
   private log: LogFn;
   private getTabCount: (() => number) | undefined;
   private settings: Settings;
-  private measures: Record<string, number> = {};
+  private measures: Record<string, number> = copyCounts({});
   private monitoring = false;
   private snapshots: HeapSnapshot[] = [];
   private measureBaselines: MeasureBaseline[] = [];
@@ -197,7 +261,12 @@ export class MemoryMonitor {
     const { log, getTabCount, ...settings } = options;
     this.log = log;
     this.getTabCount = getTabCount;
-    this.settings = { ...defaults, ...settings };
+    this.settings = mergeSettings(settings);
+    assertPositiveInterval(
+      this.settings.measurementIntervalMs,
+      "measurementIntervalMs",
+    );
+    assertPositiveInterval(this.settings.slidingWindowMs, "slidingWindowMs");
   }
 
   /** Whether the sampling interval is currently running. */
@@ -207,7 +276,7 @@ export class MemoryMonitor {
 
   /** Replace the measured counts included in leak reports. */
   setMeasures(measures: Record<string, number>): void {
-    this.measures = measures;
+    this.measures = copyCounts(measures);
   }
 
   /** Start sampling. Later calls are no-ops while already running. */
@@ -221,12 +290,25 @@ export class MemoryMonitor {
     );
   }
 
-  /** Stop sampling. */
+  /** Stop sampling. Leaves snapshots, baselines, and one-shot flags intact. */
   stop(): void {
     if (!this.monitoring) return;
     clearInterval(this.intervalId);
     this.intervalId = undefined;
     this.monitoring = false;
+  }
+
+  /**
+   * Clear samples, baselines, detected leak, and one-shot warn flags.
+   * Does not start or stop the timer — call after `stop()` or while running
+   * to begin a new armed session.
+   */
+  reset(): void {
+    this.snapshots = [];
+    this.measureBaselines = [];
+    this.hasWarnedAboutLeak = false;
+    this.hasWarnedAboutUsage = false;
+    this.potentialLeak = undefined;
   }
 
   /** Latest heap reading and the leak detected for the current window, if any. */
@@ -243,15 +325,13 @@ export class MemoryMonitor {
       const usedMb = usedJsHeapSizeMb();
       if (usedMb === undefined) return;
 
-      const now = Date.now();
+      const now = sampleTimestampMs();
       this.snapshots.push({ timestamp: now, usedJSHeapSizeMb: usedMb });
-
-      while (
-        this.snapshots[0] !== undefined &&
-        this.snapshots[0].timestamp < now - this.settings.slidingWindowMs
-      ) {
-        this.snapshots.shift();
-      }
+      this.snapshots = this.snapshots.filter(
+        (snapshot) =>
+          snapshot.timestamp <= now &&
+          snapshot.timestamp >= now - this.settings.slidingWindowMs,
+      );
 
       this.updateMeasureBaseline(now);
       this.potentialLeak = detectMemoryLeak(this.snapshots, this.settings);
@@ -284,9 +364,9 @@ export class MemoryMonitor {
   private reportMetadata(usedMb: number): ReportMetadata {
     const metadata: ReportMetadata = {
       usedJSHeapSizeMb: usedMb,
-      sessionDurationMinutes: Math.round(performance.now() / MINUTE),
-      tabVisible: self.document.visibilityState === "visible",
-      measures: this.measures,
+      sessionDurationMinutes: Math.round(sampleTimestampMs() / MINUTE),
+      tabVisible: this.isTabVisible(),
+      measures: { ...this.measures },
     };
 
     if (this.getTabCount) {
@@ -294,6 +374,14 @@ export class MemoryMonitor {
     }
 
     return metadata;
+  }
+
+  private isTabVisible(): boolean {
+    try {
+      return self.document.visibilityState === "visible";
+    } catch {
+      return false;
+    }
   }
 
   /** Keep two measure samples, at least half a sliding window apart. */
@@ -306,7 +394,7 @@ export class MemoryMonitor {
 
     this.measureBaselines.push({
       timestamp: now,
-      counts: { ...this.measures },
+      counts: copyCounts(this.measures),
     });
 
     if (this.measureBaselines.length > 2) {
@@ -324,7 +412,7 @@ export class MemoryMonitor {
     if (!baseline) return;
     const deltas: [string, number][] = [];
     for (const [name, count] of Object.entries(counts)) {
-      const delta = count - (baseline.counts[name] ?? 0);
+      const delta = count - baselineCount(baseline.counts, name);
       if (delta !== 0) deltas.push([name, delta]);
     }
     deltas.sort((left, right) => Math.abs(right[1]) - Math.abs(left[1]));
