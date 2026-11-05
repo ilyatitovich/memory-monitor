@@ -7,7 +7,7 @@ Zero runtime dependencies.
 ## Install
 
 ```bash
-npm install memory-monitor
+pnpm add memory-monitor
 ```
 
 Requires a build that can resolve the package’s ESM export (`dist/index.js` + types).
@@ -56,11 +56,11 @@ new MemoryMonitor({ log, ...THRESHOLD_PRESETS.sensitive });
 
 ## Browser support
 
-| Environment | Behavior |
-| --- | --- |
-| Chromium with `performance.memory` | Samples heap; may emit leak / high-usage logs |
-| Firefox, Safari, and other browsers without `performance.memory` | `start()` returns immediately; no timer is started |
-| Node / non-browser | Unsupported (`window.performance` / `memory` absent) |
+| Environment                                                      | Behavior                                             |
+| ---------------------------------------------------------------- | ---------------------------------------------------- |
+| Chromium with `performance.memory`                               | Samples heap; may emit leak / high-usage logs        |
+| Firefox, Safari, and other browsers without `performance.memory` | `start()` returns immediately; no timer is started   |
+| Node / non-browser                                               | Unsupported (`window.performance` / `memory` absent) |
 
 `performance.memory` is a **non-standard Chrome API**. It is coarse (roughly megabyte granularity), can be affected by GC timing, and may be restricted or unavailable under certain cross-origin isolation / privacy settings. Treat alerts as catastrophic signals, not precise profilers.
 
@@ -79,18 +79,18 @@ If `log` or `getTabCount` throws, the tick is caught and the corresponding one-s
 
 Pass any subset of these on the constructor; omitted fields use the defaults below.
 
-| Setting | Default | Meaning |
-| --- | --- | --- |
-| `highUsageMb` | `2500` | Absolute heap size (MB) that triggers a high-usage report |
-| `leakGrowthMb` | `1500` | Minimum growth (MB) across the sliding window to count as a leak |
-| `sustainedGrowthMbPerSecond` | `1` | Later-half least-squares slope must exceed this (MB/s) |
-| `measurementIntervalMs` | `10000` | Sampling interval |
-| `slidingWindowMs` | `600000` (10 min) | How long samples are retained |
-| `minWindowCoverageMs` | `300000` (5 min) | Minimum span between first and last sample before leak detection runs |
-| `minLeakSamples` | `5` | Minimum samples required for leak detection |
-| `maxMeasureDeltas` | `20` | Cap on measure keys included in `measureGrowth` |
-| `maxHeapHistoryPoints` | `20` | Cap on downsampled points in `heapSizeHistory` |
-| `reportHighUsage` | `true` | When `false`, only leak events are reported |
+| Setting                      | Default           | Meaning                                                               |
+| ---------------------------- | ----------------- | --------------------------------------------------------------------- |
+| `highUsageMb`                | `2500`            | Absolute heap size (MB) that triggers a high-usage report             |
+| `leakGrowthMb`               | `1500`            | Minimum growth (MB) across the sliding window to count as a leak      |
+| `sustainedGrowthMbPerSecond` | `1`               | Later-half least-squares slope must exceed this (MB/s)                |
+| `measurementIntervalMs`      | `10000`           | Sampling interval                                                     |
+| `slidingWindowMs`            | `600000` (10 min) | How long samples are retained                                         |
+| `minWindowCoverageMs`        | `300000` (5 min)  | Minimum span between first and last sample before leak detection runs |
+| `minLeakSamples`             | `5`               | Minimum samples required for leak detection                           |
+| `maxMeasureDeltas`           | `20`              | Cap on measure keys included in `measureGrowth`                       |
+| `maxHeapHistoryPoints`       | `20`              | Cap on downsampled points in `heapSizeHistory`                        |
+| `reportHighUsage`            | `true`            | When `false`, only leak events are reported                           |
 
 ### Leak heuristic (summary)
 
@@ -142,17 +142,17 @@ A leak is reported when the sliding window has enough samples and coverage, tota
 
 ## API surface
 
-| Member | Role |
-| --- | --- |
-| `new MemoryMonitor({ log, getTabCount?, …settings })` | Create a monitor |
-| `setMeasures(counts)` | Replace app counters included in reports (copied) |
-| `start()` / `stop()` | Begin or end sampling (`stop` keeps session state) |
-| `reset()` | Clear samples, baselines, and one-shot flags |
-| `getMemoryInfo()` | `{ memoryUsage, leak }` for the current window |
-| `MEMORY_EVENT` | Stable log message strings (`LEAK`, `HIGH_USAGE`) |
-| `THRESHOLD_PRESETS` | `catastrophic` (defaults) and `sensitive` packs |
-| `usedJsHeapSizeMb()` | Read Chrome heap size in MB, or `undefined` |
-| `detectMemoryLeak(snapshots, settings?)` | Pure leak check used by the monitor |
+| Member                                                | Role                                               |
+| ----------------------------------------------------- | -------------------------------------------------- |
+| `new MemoryMonitor({ log, getTabCount?, …settings })` | Create a monitor                                   |
+| `setMeasures(counts)`                                 | Replace app counters included in reports (copied)  |
+| `start()` / `stop()`                                  | Begin or end sampling (`stop` keeps session state) |
+| `reset()`                                             | Clear samples, baselines, and one-shot flags       |
+| `getMemoryInfo()`                                     | `{ memoryUsage, leak }` for the current window     |
+| `MEMORY_EVENT`                                        | Stable log message strings (`LEAK`, `HIGH_USAGE`)  |
+| `THRESHOLD_PRESETS`                                   | `catastrophic` (defaults) and `sensitive` packs    |
+| `usedJsHeapSizeMb()`                                  | Read Chrome heap size in MB, or `undefined`        |
+| `detectMemoryLeak(snapshots, settings?)`              | Pure leak check used by the monitor                |
 
 Design notes and portfolio case studies: [DESIGN.md](./DESIGN.md).
 
