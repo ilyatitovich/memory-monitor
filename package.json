@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "description": "A library for monitoring memory usage and detecting memory leaks.",
+  "license": "MIT",
   "keywords": [
     "memory",
     "monitor",
@@ -11,6 +12,7 @@
     "memory-monitor"
   ],
   "author": "Ilya Titov",
+  "sideEffects": false,
   "engines": {
     "node": ">=24"
   },
@@ -21,11 +23,13 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc",
-    "test": "c8 --100 bnt"
+    "test": "c8 --100 bnt",
+    "prepack": "npm run build && npm test"
   },
   "c8": {
     "extension": [
