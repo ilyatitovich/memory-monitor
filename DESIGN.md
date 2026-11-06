@@ -1,6 +1,6 @@
 # Design Notes
 
-Portfolio-oriented write-up of the engineering decisions behind `memory-monitor`.
+Portfolio-oriented write-up of the engineering decisions behind `@ilyatitovich/memory-monitor`.
 
 ## Problem
 

@@ -1,4 +1,4 @@
-# memory-monitor
+# @ilyatitovich/memory-monitor
 
 Chrome-oriented library that samples `performance.memory.usedJSHeapSize` and reports at most one potential memory leak and one high-usage event per monitor instance via an injected `log` callback.
 
@@ -7,7 +7,7 @@ Zero runtime dependencies.
 ## Install
 
 ```bash
-pnpm add memory-monitor
+pnpm add @ilyatitovich/memory-monitor
 ```
 
 Requires a build that can resolve the package’s ESM export (`dist/index.js` + types).
@@ -15,7 +15,7 @@ Requires a build that can resolve the package’s ESM export (`dist/index.js` + 
 ## Quick Start
 
 ```ts
-import { MemoryMonitor } from "memory-monitor";
+import { MemoryMonitor } from "@ilyatitovich/memory-monitor";
 
 let openModals = 2;
 const cache = new Map<string, unknown>();
@@ -51,7 +51,7 @@ monitor.start();
 Import `THRESHOLD_PRESETS.catastrophic` (defaults) or `THRESHOLD_PRESETS.sensitive` when you want earlier warnings and can tolerate more noise:
 
 ```ts
-import { MemoryMonitor, THRESHOLD_PRESETS } from "memory-monitor";
+import { MemoryMonitor, THRESHOLD_PRESETS } from "@ilyatitovich/memory-monitor";
 
 new MemoryMonitor({ log, ...THRESHOLD_PRESETS.sensitive });
 ```
