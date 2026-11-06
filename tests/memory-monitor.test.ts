@@ -655,7 +655,7 @@ describe("MemoryMonitor", { concurrency: false }, () => {
     const heap = installChromeHeap({ mb: 100 });
     const clock = installClock(0);
     const { log, calls } = createLogMock();
-    let measures = { A: 1, B: 1, C: 1 };
+    let measures: Record<string, number> = { A: 1, B: 1, C: 1 };
     const monitor = new MemoryMonitor({
       log,
       measurementIntervalMs: TEST_INTERVAL_MS,
