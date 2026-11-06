@@ -228,8 +228,8 @@ describe("MemoryMonitor", { concurrency: false }, () => {
       highUsageMb: 800,
       measurementIntervalMs: TEST_INTERVAL_MS,
       getTabCount: () => 2,
+      getMeasures: () => measures,
     });
-    monitor.setMeasures(measures);
     enableIntervalTimers();
     monitor.start();
     tickInterval();
@@ -286,19 +286,19 @@ describe("MemoryMonitor", { concurrency: false }, () => {
     );
   });
 
-  it("copies measures on set and in report metadata", () => {
+  it("copies measures on sample and in report metadata", () => {
     const heap = installChromeHeap({ mb: 2600 });
     const { log, calls } = createLogMock();
     const measures = { cacheEntries: 10 };
     const monitor = new MemoryMonitor({
       log,
       measurementIntervalMs: TEST_INTERVAL_MS,
+      getMeasures: () => measures,
     });
-    monitor.setMeasures(measures);
-    measures.cacheEntries = 999;
     enableIntervalTimers();
     monitor.start();
     tickInterval();
+    measures.cacheEntries = 999;
 
     const reported = calls[0]?.metadata.measures as Record<string, number>;
     assert.deepEqual(reported, { cacheEntries: 10 });
@@ -485,19 +485,20 @@ describe("MemoryMonitor", { concurrency: false }, () => {
     const heap = installChromeHeap({ mb: 100 });
     const clock = installClock(0);
     const { log, calls } = createLogMock();
+    let measures = { cacheEntries: 1000, listeners: 400 };
     const monitor = new MemoryMonitor({
       log,
       measurementIntervalMs: TEST_INTERVAL_MS,
       getTabCount: () => 3,
+      getMeasures: () => measures,
     });
-    monitor.setMeasures({ cacheEntries: 1000, listeners: 400 });
     enableIntervalTimers();
     monitor.start();
 
     for (let step = 0; step <= 6; step++) {
       heap.setMb(100 + step * 300);
       if (step === 3) {
-        monitor.setMeasures({ cacheEntries: 8000, listeners: 400 });
+        measures = { cacheEntries: 8000, listeners: 400 };
       }
       tickInterval();
       clock.add(MINUTE);
@@ -654,6 +655,7 @@ describe("MemoryMonitor", { concurrency: false }, () => {
     const heap = installChromeHeap({ mb: 100 });
     const clock = installClock(0);
     const { log, calls } = createLogMock();
+    let measures = { A: 1, B: 1, C: 1 };
     const monitor = new MemoryMonitor({
       log,
       measurementIntervalMs: TEST_INTERVAL_MS,
@@ -663,19 +665,19 @@ describe("MemoryMonitor", { concurrency: false }, () => {
       minWindowCoverageMs: 5 * MINUTE,
       leakGrowthMb: 200,
       sustainedGrowthMbPerSecond: 0,
+      getMeasures: () => measures,
     });
     enableIntervalTimers();
     monitor.start();
 
-    monitor.setMeasures({ A: 1, B: 1, C: 1 });
     tickInterval();
     clock.add(4 * MINUTE);
-    monitor.setMeasures({ A: 2, B: 2, C: 2 });
+    measures = { A: 2, B: 2, C: 2 };
     tickInterval();
     clock.add(MINUTE);
     tickInterval();
     clock.add(5 * MINUTE);
-    monitor.setMeasures({ A: 102, B: 52, C: 3, D: 1 });
+    measures = { A: 102, B: 52, C: 3, D: 1 };
     heap.setMb(400);
     tickInterval();
 
@@ -694,6 +696,7 @@ describe("MemoryMonitor", { concurrency: false }, () => {
     const heap = installChromeHeap({ mb: 100 });
     const clock = installClock(0);
     const { log, calls } = createLogMock();
+    let measures: Record<string, number> = { cacheEntries: 10, listeners: 5 };
     const monitor = new MemoryMonitor({
       log,
       measurementIntervalMs: TEST_INTERVAL_MS,
@@ -701,17 +704,17 @@ describe("MemoryMonitor", { concurrency: false }, () => {
       minWindowCoverageMs: 5 * MINUTE,
       leakGrowthMb: 200,
       sustainedGrowthMbPerSecond: 0,
+      getMeasures: () => measures,
     });
     enableIntervalTimers();
     monitor.start();
 
-    monitor.setMeasures({ cacheEntries: 10, listeners: 5 });
     tickInterval();
     clock.add(2.5 * MINUTE);
     heap.setMb(200);
     tickInterval();
     clock.add(2.5 * MINUTE);
-    monitor.setMeasures({ cacheEntries: 10, listeners: 8, sockets: 4 });
+    measures = { cacheEntries: 10, listeners: 8, sockets: 4 };
     heap.setMb(400);
     tickInterval();
 
@@ -827,6 +830,7 @@ describe("MemoryMonitor", { concurrency: false }, () => {
     const heap = installChromeHeap({ mb: 100 });
     const clock = installClock(0);
     const { log, calls } = createLogMock();
+    let measures: Record<string, number> = { cacheEntries: 1 };
     const monitor = new MemoryMonitor({
       log,
       measurementIntervalMs: TEST_INTERVAL_MS,
@@ -834,17 +838,17 @@ describe("MemoryMonitor", { concurrency: false }, () => {
       minWindowCoverageMs: 5 * MINUTE,
       leakGrowthMb: 200,
       sustainedGrowthMbPerSecond: 0,
+      getMeasures: () => measures,
     });
     enableIntervalTimers();
     monitor.start();
 
-    monitor.setMeasures({ cacheEntries: 1 });
     tickInterval();
     clock.add(2.5 * MINUTE);
     heap.setMb(200);
     tickInterval();
     clock.add(2.5 * MINUTE);
-    monitor.setMeasures({ cacheEntries: 1, toString: 4 });
+    measures = { cacheEntries: 1, toString: 4 };
     heap.setMb(400);
     tickInterval();
 

@@ -52,6 +52,13 @@ export type SettingsOverrides = {
 export interface MemoryMonitorOptions extends SettingsOverrides {
   log: LogFn;
   getTabCount?: () => number;
+  /**
+   * App counters read on each sample.
+   * Useful because leak reports attribute heap growth to whatever those
+   * counters are at sample time. A constructor callback stays current on its
+   * own; a separate setter is easy to forget before the tick that reports.
+   */
+  getMeasures?: () => Record<string, number>;
 }
 
 /** Shared fields attached to every monitor log event. */
@@ -141,10 +148,7 @@ function copyCounts(counts: Record<string, number>): Record<string, number> {
   return Object.assign(Object.create(null), counts) as Record<string, number>;
 }
 
-function baselineCount(
-  counts: Record<string, number>,
-  name: string,
-): number {
+function baselineCount(counts: Record<string, number>, name: string): number {
   return Object.hasOwn(counts, name) ? counts[name]! : 0;
 }
 
@@ -154,10 +158,7 @@ function baselineCount(
  */
 export function usedJsHeapSizeMb(): number | undefined {
   try {
-    const memory: unknown = Reflect.get(
-      window?.performance ?? {},
-      "memory",
-    );
+    const memory: unknown = Reflect.get(window?.performance ?? {}, "memory");
     if (
       memory !== null &&
       typeof memory === "object" &&
@@ -239,6 +240,14 @@ function isSupported(): boolean {
   return usedJsHeapSizeMb() !== undefined;
 }
 
+function isTabVisible(): boolean {
+  try {
+    return self.document.visibilityState === "visible";
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Samples the JS heap and reports one leak or high-usage event per armed session.
  * Call {@link MemoryMonitor.reset} to clear samples and re-arm one-shot alerts;
@@ -247,6 +256,7 @@ function isSupported(): boolean {
 export class MemoryMonitor {
   private log: LogFn;
   private getTabCount: (() => number) | undefined;
+  private getMeasures: (() => Record<string, number>) | undefined;
   private settings: Settings;
   private measures: Record<string, number> = copyCounts({});
   private monitoring = false;
@@ -258,9 +268,10 @@ export class MemoryMonitor {
   private potentialLeak: MemoryLeak | undefined;
 
   constructor(options: MemoryMonitorOptions) {
-    const { log, getTabCount, ...settings } = options;
+    const { log, getTabCount, getMeasures, ...settings } = options;
     this.log = log;
     this.getTabCount = getTabCount;
+    this.getMeasures = getMeasures;
     this.settings = mergeSettings(settings);
     assertPositiveInterval(
       this.settings.measurementIntervalMs,
@@ -269,17 +280,10 @@ export class MemoryMonitor {
     assertPositiveInterval(this.settings.slidingWindowMs, "slidingWindowMs");
   }
 
-  /** Whether the sampling interval is currently running. */
   get isMonitoring(): boolean {
     return this.monitoring;
   }
 
-  /** Replace the measured counts included in leak reports. */
-  setMeasures(measures: Record<string, number>): void {
-    this.measures = copyCounts(measures);
-  }
-
-  /** Start sampling. Later calls are no-ops while already running. */
   start(): void {
     if (!isSupported() || this.monitoring) return;
 
@@ -290,7 +294,6 @@ export class MemoryMonitor {
     );
   }
 
-  /** Stop sampling. Leaves snapshots, baselines, and one-shot flags intact. */
   stop(): void {
     if (!this.monitoring) return;
     clearInterval(this.intervalId);
@@ -298,11 +301,6 @@ export class MemoryMonitor {
     this.monitoring = false;
   }
 
-  /**
-   * Clear samples, baselines, detected leak, and one-shot warn flags.
-   * Does not start or stop the timer — call after `stop()` or while running
-   * to begin a new armed session.
-   */
   reset(): void {
     this.snapshots = [];
     this.measureBaselines = [];
@@ -324,6 +322,10 @@ export class MemoryMonitor {
     try {
       const usedMb = usedJsHeapSizeMb();
       if (usedMb === undefined) return;
+
+      if (this.getMeasures) {
+        this.measures = copyCounts(this.getMeasures());
+      }
 
       const now = sampleTimestampMs();
       this.snapshots.push({ timestamp: now, usedJSHeapSizeMb: usedMb });
@@ -365,7 +367,7 @@ export class MemoryMonitor {
     const metadata: ReportMetadata = {
       usedJSHeapSizeMb: usedMb,
       sessionDurationMinutes: Math.round(sampleTimestampMs() / MINUTE),
-      tabVisible: this.isTabVisible(),
+      tabVisible: isTabVisible(),
       measures: { ...this.measures },
     };
 
@@ -374,14 +376,6 @@ export class MemoryMonitor {
     }
 
     return metadata;
-  }
-
-  private isTabVisible(): boolean {
-    try {
-      return self.document.visibilityState === "visible";
-    } catch {
-      return false;
-    }
   }
 
   /** Keep two measure samples, at least half a sliding window apart. */

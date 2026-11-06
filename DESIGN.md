@@ -9,7 +9,7 @@ Long-lived Chromium tabs can grow until the process is killed, often without a c
 ## Architecture
 
 ```text
-Caller ──log / getTabCount / setMeasures──► MemoryMonitor
+Caller ──log / getTabCount / getMeasures──► MemoryMonitor
                                               │
                          setInterval ─────────┤
                                               ▼
@@ -43,7 +43,7 @@ Why the later half: hydration spikes and GC sawteeth often rise then flatten. Re
 
 ## Measure attribution
 
-`setMeasures` copies caller counters into a null-prototype record. Baselines are retained (at most two, spaced across half the sliding window). On a leak report, `measureGrowth` lists the largest non-zero deltas versus the oldest baseline so on-call engineers see which app-level tallies moved with the heap.
+`getMeasures`, passed to the constructor, is called on each sample and copied into a null-prototype record. A pull callback is useful because the counters that explain a leak are whichever values exist at sample time; the monitor reads them itself instead of depending on a setter the app must remember to call before that tick. Baselines are retained (at most two, spaced across half the sliding window). On a leak report, `measureGrowth` lists the largest non-zero deltas versus the oldest baseline so on-call engineers see which app-level tallies moved with the heap.
 
 Prototype keys such as `toString` are handled with `Object.hasOwn` so inherited `Object.prototype` values never look like baselines.
 
@@ -62,7 +62,7 @@ Prototype keys such as `toString` are handled with `Object.hasOwn` so inherited 
 A full Playwright/Chromium harness is intentionally out of scope for this package’s CI cost. To validate against real GC coarseness:
 
 1. Build (`pnpm run build`) and load `dist/index.js` from a Chromium page that is cross-origin isolated if you need finer `performance.memory` granularity.
-2. Drive a controlled allocator (e.g. retain large `ArrayBuffer`s on an interval) while calling `setMeasures` with a matching counter.
+2. Drive a controlled allocator (e.g. retain large `ArrayBuffer`s on an interval) while `getMeasures` returns a matching counter.
 3. Confirm a single leak event, inspect `heapSizeHistory` and `measureGrowth`, then `reset()` and repeat.
 4. Background the tab for several minutes and note timer throttling versus `minLeakSamples` / `minWindowCoverageMs`.
 

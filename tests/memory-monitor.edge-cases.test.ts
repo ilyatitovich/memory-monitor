@@ -62,21 +62,19 @@ describe("real-world memory sessions", { concurrency: false }, () => {
     const heap = installChromeHeap({ mb: 400 });
     const clock = installClock(0);
     const { log, calls } = createLogMock();
+    const live = { cacheEntries: 8_000, listeners: 20_000 };
     const monitor = new MemoryMonitor({
       log,
       measurementIntervalMs: TEST_INTERVAL_MS,
       getTabCount: () => 4,
+      getMeasures: () => live,
     });
-
-    const live = { cacheEntries: 8_000, listeners: 20_000 };
-    monitor.setMeasures(live);
     enableIntervalTimers();
     monitor.start();
 
     for (let minute = 0; minute <= 8; minute++) {
       live.cacheEntries = 8_000 + minute * 6_000;
       live.listeners = 20_000 + minute * 2_000;
-      monitor.setMeasures({ ...live });
       heap.setMb(400 + minute * 280);
       tickInterval();
       clock.add(MINUTE);
@@ -100,13 +98,13 @@ describe("real-world memory sessions", { concurrency: false }, () => {
       visibilityState: "hidden",
     });
     const { log, calls } = createLogMock();
+    const measures = { cacheEntries: 4200, listeners: 18_000 };
     const monitor = new MemoryMonitor({
       log,
       measurementIntervalMs: TEST_INTERVAL_MS,
       getTabCount: () => 8,
+      getMeasures: () => measures,
     });
-    const measures = { cacheEntries: 4200, listeners: 18_000 };
-    monitor.setMeasures(measures);
     enableIntervalTimers();
     monitor.start();
     tickInterval();
@@ -193,6 +191,14 @@ describe("real-world memory sessions", { concurrency: false }, () => {
     const heap = installChromeHeap({ mb: 100 });
     const clock = installClock(0);
     const { log, calls } = createLogMock();
+    const before: Record<string, number> = {};
+    const after: Record<string, number> = {};
+    for (let index = 0; index < 30; index++) {
+      const name = `metric${index}`;
+      before[name] = 10;
+      after[name] = 10 + index;
+    }
+    let measures = before;
     const monitor = new MemoryMonitor({
       log,
       measurementIntervalMs: TEST_INTERVAL_MS,
@@ -201,24 +207,16 @@ describe("real-world memory sessions", { concurrency: false }, () => {
       minWindowCoverageMs: 5 * MINUTE,
       leakGrowthMb: 200,
       sustainedGrowthMbPerSecond: 0,
+      getMeasures: () => measures,
     });
-
-    const before: Record<string, number> = {};
-    const after: Record<string, number> = {};
-    for (let index = 0; index < 30; index++) {
-      const name = `metric${index}`;
-      before[name] = 10;
-      after[name] = 10 + index;
-    }
     enableIntervalTimers();
     monitor.start();
-    monitor.setMeasures(before);
     tickInterval();
     clock.add(2.5 * MINUTE);
     heap.setMb(200);
     tickInterval();
     clock.add(2.5 * MINUTE);
-    monitor.setMeasures(after);
+    measures = after;
     heap.setMb(400);
     tickInterval();
 
@@ -264,8 +262,8 @@ describe("real-world memory sessions", { concurrency: false }, () => {
       log,
       measurementIntervalMs: TEST_INTERVAL_MS,
       getTabCount: () => 1,
+      getMeasures: () => ({ cacheEntries: 4200, listeners: 18_000 }),
     });
-    monitor.setMeasures({ cacheEntries: 4200, listeners: 18_000 });
     enableIntervalTimers();
     monitor.start();
 

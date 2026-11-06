@@ -17,6 +17,9 @@ Requires a build that can resolve the package’s ESM export (`dist/index.js` + 
 ```ts
 import { MemoryMonitor } from "memory-monitor";
 
+let openModals = 2;
+const cache = new Map<string, unknown>();
+
 const monitor = new MemoryMonitor({
   log(message, metadata) {
     // Forward to your remote logger / analytics sink
@@ -24,14 +27,13 @@ const monitor = new MemoryMonitor({
   },
   // Optional: included in report metadata when provided
   getTabCount: () => window.open?.length ?? 1,
+  // Optional: read on each sample so leak reports see live counters
+  getMeasures: () => ({
+    openModals,
+    cachedItems: cache.size,
+  }),
   // Optional overrides — see Settings below
   highUsageMb: 2500,
-});
-
-// Optional: app-level counters for leak attribution
-monitor.setMeasures({
-  openModals: 2,
-  cachedItems: 1400,
 });
 
 monitor.start();
@@ -73,7 +75,7 @@ Each armed session emits:
 
 `stop()` only clears the sampling timer. Snapshot history and warn flags persist across `stop()` / `start()`, so alerts stay one-shot for that session. Call `reset()` to clear samples, baselines, detected leak state, and warn flags and begin a new armed session (with or without stopping first).
 
-If `log` or `getTabCount` throws, the tick is caught and the corresponding one-shot flag is **not** set, so the next successful tick can still report. Missing `document` is treated as `tabVisible: false` without dropping the report.
+If `log`, `getTabCount`, or `getMeasures` throws, the tick is caught and the corresponding one-shot flag is **not** set, so the next successful tick can still report. Missing `document` is treated as `tabVisible: false` without dropping the report.
 
 ## Settings
 
@@ -109,7 +111,7 @@ A leak is reported when the sliding window has enough samples and coverage, tota
   usedJSHeapSizeMb: number;
   sessionDurationMinutes: number; // from performance.now()
   tabVisible: boolean;            // document.visibilityState === "visible"
-  measures: Record<string, number>;
+  measures: Record<string, number>; // getMeasures() this sample, or {}
   tabCount?: number;              // only if getTabCount was provided
   leak: {
     growthMb: number;
@@ -135,7 +137,7 @@ A leak is reported when the sliding window has enough samples and coverage, tota
   usedJSHeapSizeMb: number;
   sessionDurationMinutes: number;
   tabVisible: boolean;
-  measures: Record<string, number>;
+  measures: Record<string, number>; // getMeasures() this sample, or {}
   tabCount?: number;
 }
 ```
@@ -144,8 +146,7 @@ A leak is reported when the sliding window has enough samples and coverage, tota
 
 | Member                                                | Role                                               |
 | ----------------------------------------------------- | -------------------------------------------------- |
-| `new MemoryMonitor({ log, getTabCount?, …settings })` | Create a monitor                                   |
-| `setMeasures(counts)`                                 | Replace app counters included in reports (copied)  |
+| `new MemoryMonitor({ log, getTabCount?, getMeasures?, …settings })` | Create a monitor. `getMeasures` is read on each sample so attribution tracks live counters without a setter. |
 | `start()` / `stop()`                                  | Begin or end sampling (`stop` keeps session state) |
 | `reset()`                                             | Clear samples, baselines, and one-shot flags       |
 | `getMemoryInfo()`                                     | `{ memoryUsage, leak }` for the current window     |

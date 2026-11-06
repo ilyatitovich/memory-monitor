@@ -5,6 +5,14 @@
   "packageManager": "pnpm@12.16.1",
   "description": "A library for monitoring memory usage and detecting memory leaks.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ilyatitov/memory-monitor.git"
+  },
+  "homepage": "https://github.com/ilyatitov/memory-monitor",
+  "bugs": {
+    "url": "https://github.com/ilyatitov/memory-monitor/issues"
+  },
   "keywords": [
     "memory",
     "monitor",
