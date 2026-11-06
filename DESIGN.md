@@ -1,4 +1,4 @@
-# Design notes
+# Design Notes
 
 Portfolio-oriented write-up of the engineering decisions behind `memory-monitor`.
 
@@ -29,7 +29,7 @@ Boundaries that matter:
 - **Private monitor state** — consumers cannot mutate snapshots or warn flags; `reset()` is the supported re-arm path.
 - **Zero runtime dependencies** — failure modes stay inside this module and the caller’s sink.
 
-## Leak heuristic
+## Leak Heuristic
 
 Defaults target near-crash growth, not slow leaks:
 
@@ -41,13 +41,13 @@ Why the later half: hydration spikes and GC sawteeth often rise then flatten. Re
 
 `THRESHOLD_PRESETS.sensitive` lowers the bars for earlier signal at the cost of more false positives. Prefer measuring in your app before changing production defaults.
 
-## Measure attribution
+## Measure Attribution
 
 `getMeasures`, passed to the constructor, is called on each sample and copied into a null-prototype record. A pull callback is useful because the counters that explain a leak are whichever values exist at sample time; the monitor reads them itself instead of depending on a setter the app must remember to call before that tick. Baselines are retained (at most two, spaced across half the sliding window). On a leak report, `measureGrowth` lists the largest non-zero deltas versus the oldest baseline so on-call engineers see which app-level tallies moved with the heap.
 
 Prototype keys such as `toString` are handled with `Object.hasOwn` so inherited `Object.prototype` values never look like baselines.
 
-## Reliability choices
+## Reliability Choices
 
 | Decision | Rationale |
 | --- | --- |
@@ -57,7 +57,7 @@ Prototype keys such as `toString` are handled with `Object.hasOwn` so inherited 
 | Sample time via `performance.now()` | Monotonic window math; wall-clock jumps must not poison eviction. |
 | Defensive copies of `measures` | Async loggers must not observe later mutation of the caller’s object. |
 
-## Chrome verification methodology (no in-repo browser harness)
+## Chrome Verification Methodology (No In-Repo Browser Harness)
 
 A full Playwright/Chromium harness is intentionally out of scope for this package’s CI cost. To validate against real GC coarseness:
 
@@ -68,13 +68,13 @@ A full Playwright/Chromium harness is intentionally out of scope for this packag
 
 Record false-positive rate under “allocate then release” workloads before adopting `THRESHOLD_PRESETS.sensitive` in production.
 
-## Supply chain and lint posture
+## Supply Chain and Lint Posture
 
 - **Lint gate** = TypeScript `strict` typecheck (`pnpm run lint`), matching CI.
 - **Runtime dependencies**: none; `pnpm run audit:prod` must stay clean at high severity.
 - **Dev tooling** (`c8` → `glob` / `minimatch`): moderate advisories may appear in a full `pnpm audit`. They do not ship in `dist/`. Prefer upgrading `c8` when a fixed release exists; do not downgrade solely to silence noise if it breaks the coverage gate.
 
-## Case studies worth presenting
+## Case Studies Worth Presenting
 
 1. **Heuristic design** — total growth + later-half slope vs simple thresholds; GC/hydration fixtures.
 2. **Attribution without framework coupling** — copied measures and capped deltas for on-call triage.

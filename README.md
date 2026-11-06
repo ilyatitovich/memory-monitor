@@ -12,7 +12,7 @@ pnpm add memory-monitor
 
 Requires a build that can resolve the package’s ESM export (`dist/index.js` + types).
 
-## Quick start
+## Quick Start
 
 ```ts
 import { MemoryMonitor } from "memory-monitor";
@@ -56,7 +56,7 @@ import { MemoryMonitor, THRESHOLD_PRESETS } from "memory-monitor";
 new MemoryMonitor({ log, ...THRESHOLD_PRESETS.sensitive });
 ```
 
-## Browser support
+## Browser Support
 
 | Environment                                                      | Behavior                                             |
 | ---------------------------------------------------------------- | ---------------------------------------------------- |
@@ -66,7 +66,7 @@ new MemoryMonitor({ log, ...THRESHOLD_PRESETS.sensitive });
 
 `performance.memory` is a **non-standard Chrome API**. It is coarse (roughly megabyte granularity), can be affected by GC timing, and may be restricted or unavailable under certain cross-origin isolation / privacy settings. Treat alerts as catastrophic signals, not precise profilers.
 
-## One-shot semantics
+## One-Shot Semantics
 
 Each armed session emits:
 
@@ -94,13 +94,13 @@ Pass any subset of these on the constructor; omitted fields use the defaults bel
 | `maxHeapHistoryPoints`       | `20`              | Cap on downsampled points in `heapSizeHistory`                        |
 | `reportHighUsage`            | `true`            | When `false`, only leak events are reported                           |
 
-### Leak heuristic (summary)
+### Leak Heuristic (Summary)
 
 A leak is reported when the sliding window has enough samples and coverage, total growth is at least `leakGrowthMb`, and the **later half** of the window still climbs faster than `sustainedGrowthMbPerSecond`. That combination is meant to ignore short GC sawtooth / hydration spikes while catching sustained catastrophic growth.
 
 `detectMemoryLeak(snapshots, settings?)` is also exported for unit-testing the heuristic in isolation.
 
-## Log events and payload shape
+## Log Events and Payload Shape
 
 `log` is called as `log(message, metadata)`.
 
@@ -142,7 +142,7 @@ A leak is reported when the sliding window has enough samples and coverage, tota
 }
 ```
 
-## API surface
+## API Surface
 
 | Member                                                | Role                                               |
 | ----------------------------------------------------- | -------------------------------------------------- |
